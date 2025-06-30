@@ -216,8 +216,7 @@ describe('CoreToolScheduler with payload', () => {
 
     if (confirmationDetails) {
       const payload = {
-        updatedParams: { newContent: 'final version' },
-        updatedDiff: 'new diff',
+        newContent: 'final version',
       };
       await scheduler.handleConfirmationResponse(
         '1',

@@ -25,6 +25,7 @@ import {
   ModifyContext,
   modifyWithEditor,
 } from '../tools/modifiable-tool.js';
+import * as Diff from 'diff';
 
 export type ValidatingToolCall = {
   status: 'validating';
@@ -469,10 +470,7 @@ export class CoreToolScheduler {
               ...confirmationDetails,
               onConfirm: (
                 outcome: ToolConfirmationOutcome,
-                payload?: {
-                  updatedParams?: Record<string, unknown>;
-                  updatedDiff?: string;
-                },
+                payload?: { newContent: string },
               ) =>
                 this.handleConfirmationResponse(
                   reqInfo.callId,
@@ -510,17 +508,11 @@ export class CoreToolScheduler {
     callId: string,
     originalOnConfirm: (
       outcome: ToolConfirmationOutcome,
-      payload?: {
-        updatedParams?: Record<string, unknown>;
-        updatedDiff?: string;
-      },
+      payload?: { newContent: string },
     ) => Promise<void>,
     outcome: ToolConfirmationOutcome,
     signal: AbortSignal,
-    payload?: {
-      updatedParams?: Record<string, unknown>;
-      updatedDiff?: string;
-    },
+    payload?: { newContent: string },
   ): Promise<void> {
     const toolCall = this.toolCalls.find(
       (c) => c.request.callId === callId && c.status === 'awaiting_approval',
@@ -580,15 +572,24 @@ export class CoreToolScheduler {
         waitingToolCall.confirmationDetails.type === 'edit' &&
         isModifiableTool(waitingToolCall.tool)
       ) {
-        if (payload.updatedParams) {
-          this.setArgsInternal(callId, payload.updatedParams);
-        }
-        if (payload.updatedDiff) {
-          this.setStatusInternal(callId, 'awaiting_approval', {
-            ...waitingToolCall.confirmationDetails,
-            fileDiff: payload.updatedDiff,
-          });
-        }
+        const modifyContext = waitingToolCall.tool.getModifyContext(signal);
+        const updatedParams = modifyContext.createUpdatedParams(
+          await modifyContext.getCurrentContent(waitingToolCall.request.args),
+          payload.newContent,
+          waitingToolCall.request.args,
+        );
+        const updatedDiff = Diff.createPatch(
+          modifyContext.getFilePath(waitingToolCall.request.args),
+          await modifyContext.getCurrentContent(waitingToolCall.request.args),
+          payload.newContent,
+          'Current',
+          'Proposed',
+        );
+        this.setArgsInternal(callId, updatedParams);
+        this.setStatusInternal(callId, 'awaiting_approval', {
+          ...waitingToolCall.confirmationDetails,
+          fileDiff: updatedDiff,
+        });
       }
       this.setStatusInternal(callId, 'scheduled');
     }
